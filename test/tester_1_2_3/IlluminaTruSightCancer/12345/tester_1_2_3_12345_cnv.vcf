@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##ALT=<ID=DEL,Description="Deletion">
+##ALT=<ID=DUP,Description="Duplication">
+##FORMAT=<ID=BF,Number=1,Type=Float,Description="Bayes factor">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=RE,Number=1,Type=Integer,Description="Reads expected">
+##FORMAT=<ID=RO,Number=1,Type=Integer,Description="Reads observed">
+##FORMAT=<ID=RR,Number=1,Type=Float,Description="Reads ratio">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the variant described in this record">
+##INFO=<ID=EndPosition,Number=1,Type=Integer,Description="Position of last affected region">
+##INFO=<ID=Regions,Number=1,Type=Integer,Description="Number of affected regions of interest">
+##INFO=<ID=StartPosition,Number=1,Type=Integer,Description="Position of first affected region">
+##fileDate=20190219
+##reference=file:///state/partition1/db/human/gatk/2.8/b37/human_g1k_v37.fasta
+##source=ExomeDepth1.1.10
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	12345
