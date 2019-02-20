@@ -2,4 +2,4 @@
 
 To run:
 
-python generateCNVReport.py --runid <runid> --output <output_file_name.csv>
+python generateCNVReport.py --runid <run id> --output <output_file_name.csv>
