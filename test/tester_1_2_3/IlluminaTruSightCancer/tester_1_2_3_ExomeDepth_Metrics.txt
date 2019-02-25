@@ -1,4 +1,0 @@
-BamPath	Fragments	Correlation
-/share/data/results/tester_1_2_3/IlluminaTruSightCancer/12345/tester_1_2_3_12345.bam	657321	0.98751
-/share/data/results/tester_1_2_3/IlluminaTruSightCancer/23456/tester_1_2_3_23456.bam	758392	0.98328
-

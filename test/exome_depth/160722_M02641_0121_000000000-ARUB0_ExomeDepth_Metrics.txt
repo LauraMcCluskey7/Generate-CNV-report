@@ -1,0 +1,6 @@
+BamPath	Fragments	Correlation
+output/final_bam/sample1_S21_final.bam	684056	0.99817
+output/final_bam/sample2_S23_final.bam	354501	0.99014
+output/final_bam/sample3_S24_final.bam	354501	0.97014
+output/final_bam/sample4_S25_final.bam	354501	0.99014
+

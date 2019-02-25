@@ -1,169 +1,257 @@
 import pandas
-import numpy
 import allel
 import argparse
+from pathlib import Path
 
-dataFrame=pandas.DataFrame()
-
-parser=argparse.ArgumentParser()
+# Get the script arguments
+parser = argparse.ArgumentParser()
 parser.add_argument('--runid')
 parser.add_argument('--output')
-args=parser.parse_args()
-runid=args.runid
-output_file=args.output
+parser.add_argument('--bed')
+parser.add_argument('--exome_metrics')
+parser.add_argument('--manta_dir')
+parser.add_argument('--exome_dir')
+parser.add_argument('--coverage_dir')
 
-samples_list=[]
-Exome_depth_metrics= pandas.read_table("/data/results/"+ runid +"/IlluminaTruSightCancer/" + runid+ "_ExomeDepth_Metrics.txt") 
-num_rows_exome_depth_metrics= Exome_depth_metrics.shape[0]
+args = parser.parse_args()
+runid = args.runid
+output_file = args.output
+bed = args.bed
+manta_dir = args.manta_dir
+exome_dir = args.exome_dir
+coverage_dir = args.coverage_dir
+exome_metrics = args.exome_metrics
 
-#extract sample names from exome_depth_metrics file and create sample list
-row=0
-while (row<num_rows_exome_depth_metrics):
-    samples_bam= Exome_depth_metrics.iloc[row,0].split("_")
-    sample= samples_bam[7].split(".")
-    sample_2=sample[0]
-    samples_list.append(sample_2)
-    row=row+1
+# Utility Functions
+def fix_end_position(df):
+	"""
+	Fixes the END columns:
+
+	If the END column is equal to -1 then change the end columns \
+	to the start position + 1
+
+	"""
+
+	if df['END'] != 'NA':
+
+		if int(df['END']) == -1:
+
+			return int(df['POS']) + 1
+
+	return df['END']
+
+def assign_qc(df):
+	"""
+	Assign a QC status e.g. is r squared is less than a certain value
+
+	"""
+
+	qc_comment = []
+
+	if df['Correlation'] < 0.98:
+
+		qc_comment.append('R2<0.98')
+
+	if df['depth'] < 160:
+
+		qc_comment.append('Depth<160')
+
+	if len(qc_comment) == 0:
+
+		return 'PASS'
+
+	else:
+
+		return '|'.join(qc_comment)
+
+def get_overlapping_genes(df, grouped_bed):
+	"""
+	Get the custom roi file and check to see if any of our SVs overlap with the regions.
+
+	"""
+
+	sv_start = df['POS']
+
+	if sv_start == 'NA':
+
+		return 'NA'
+
+	sv_chrom = str(df['CHROM'])
+	sv_start = int(df['POS'])
+	sv_end = int(df['END'])
+
+	gene_list = []
+
+	for gene in grouped_bed.itertuples():
+
+		gene_chrom = str(gene.Chrom)
+		gene_start = int(gene.Start)
+		gene_end = int(gene.End)
+
+		# variant start is within the gene
+		if gene_chrom == sv_chrom and gene_start <= sv_start <= gene_end:
+
+			gene_list.append(gene.gene)
+
+		# variant end is within the gene
+		elif gene_chrom == sv_chrom and gene_start <= sv_end <= gene_end:
+
+			gene_list.append(gene.gene)
+
+		# variant start is before gene and variant end is after gene e.g. variant engulfs gene.
+		elif gene_chrom == sv_chrom and (sv_start <= gene_start and sv_end >= gene_end):
+
+			gene_list.append(gene.gene)
+
+	if len(gene_list) > 0:
+
+		return '|'.join(list(set(gene_list)))
+
+	else:
+
+		return 'NA'
+
+
+# Create main dataframe
+dataFrame = pandas.DataFrame()
+
+# Read exome depth metrics file to get high coverage samples
+exome_depth_metrics = pandas.read_table(exome_metrics) 
+num_rows_exome_depth_metrics = exome_depth_metrics.shape[0]
+
+# Add sampleid column to exome depth
+exome_depth_metrics['sampleid'] = exome_depth_metrics['BamPath'].apply(lambda x: Path(x).stem.replace('_final', ''))
+
+samples_list = list(exome_depth_metrics.groupby('sampleid').count().index)
+
+
+# Read BED file
+bed_file = pandas.read_csv(bed, names=['Chrom', 'Start', 'End', 'Comment'], sep='\t', header=None)
+
+# Extract gene to new column
+bed_file['gene'] = bed_file['Comment'].apply(lambda x: x.split('.')[0])
+
+# Groupby gene and get the smallest start and largest end for each gene.
+grouped_bed = bed_file.groupby(['Chrom', 'gene']).agg({'Start': 'min', 'End': 'max'})
+
+grouped_bed = grouped_bed.reset_index()
+
 
 #Loop through all samples and read in the relevant files
 for sample in samples_list: 
-    bed_file= pandas.read_table("/data/results/" +runid+ "/IlluminaTruSightCancer/IlluminaTruSightCancer_CustomROI_b37.bed")
-    depth_of_coverage_summary=pandas.read_table("/data/results/" + runid+ "/IlluminaTruSightCancer/" +sample+ "/"+ runid+ "_"+ sample+ "_DepthOfCoverage.sample_summary")
-    depth_of_coverage_summary_mean=depth_of_coverage_summary['mean'][1]
-    
-    #Create dataframe from manta vcf
-    manta_dataframe=allel.vcf_to_dataframe("/data/results/" +runid+ "/IlluminaTruSightCancer/" +sample +"/" +runid + "_" + sample + "_sv_filtered.vcf.gz" , fields=['*'])
-    if ((manta_dataframe)is not None):
-        manta_dataframe_2=manta_dataframe.iloc[:,[0,1,11,3,9]]
-        manta_dataframe_2.columns=['CHROM', 'POS', 'END', 'REF', 'ALT_1']
-        manta_dataframe_2['Regions']= "-"
-        manta_dataframe_2["QC"]="PASS"
-        manta_dataframe_2['method']="Manta"
-    else:
-        data= [{'CHROM':'NA', 'POS':'NA', 'END':'NA', 'REF':'NA', 'ALT_1':'NA', 'Regions':'NA'}]
-        manta_dataframe_2=pandas.DataFrame(data)
-        manta_dataframe_2=manta_dataframe_2.iloc[:,[1,3,2,4,0,5]]
-        manta_dataframe_2["QC"]="PASS"
-        manta_dataframe_2['method']="Manta"
+	
+	# Get the mean depth from the summary file
+	depth_of_coverage_summary = pandas.read_table(coverage_dir + '/' +  sample + '_DepthOfCoverage.sample_summary')
+	depth_of_coverage_summary_mean = depth_of_coverage_summary['mean'][1]
+	
+	#Create dataframe from manta vcf
+	manta_df = allel.vcf_to_dataframe(manta_dir + '/' + sample + '_diploidSV.vcf.gz' , fields=['*'])
 
-    #Create dataframe from Exome depth vcf
-    Exome_dataFrame=allel.vcf_to_dataframe("/data/results/" + runid+ "/IlluminaTruSightCancer/" +sample+ "/" +runid+ "_" + sample + "_cnv.vcf.gz", fields=['*'])
-    if ((Exome_dataFrame)is not None):
-        Exome_dataFrame_2=Exome_dataFrame.iloc[:,[0,1,8,3,4,10]]
-        Exome_dataFrame_2["QC"]="PASS"
-        Exome_dataFrame_2['method']="Exome"
-    else:
-        Exome_data= [{'CHROM':'NA', 'POS':'NA', 'END':'NA', 'REF':'NA', 'ALT_1':'NA', 'Regions':'NA'}]
-        Exome_dataFrame_2=pandas.DataFrame(Exome_data)
-        Exome_dataFrame_2=Exome_dataFrame_2.iloc[:,[1,3,2,4,0,5]]
-        Exome_dataFrame_2["QC"]="PASS"
-        Exome_dataFrame_2['method']="Exome"
-   
-    #Add columns for depth and sampleid
-    if (((Exome_dataFrame_2)is not None) and ((manta_dataframe_2)is not None)):
-        Manta_Exome= Exome_dataFrame_2.append(manta_dataframe_2)
-        Manta_Exome['depth']= depth_of_coverage_summary_mean
-        Manta_Exome['sampleid']= sample
-    elif (((Exome_dataFrame_2)is None) and ((manta_dataframe_2)is not None)):
-        Manta_Exome= manta_dataframe_2
-        Manta_Exome['depth']= depth_of_coverage_summary_mean
-        Manta_Exome['sampleid']= sample
-    elif (((Exome_dataFrame_2)is not None) and ((manta_dataframe_2)is None)):
-        Manta_Exome= Exome_dataFrame_2
-        Manta_Exome['depth']= depth_of_coverage_summary_mean
-        Manta_Exome['sampleid']= sample
-    else:
-        Manta_Exome= None
+	if manta_df is not None:
 
-    #If end position is -1, change value to start_position+1   
-    if (Manta_Exome is not None):
-        row_num=0
-        Manta_exome_num_rows=Manta_Exome.shape[0]
-        while (row_num<Manta_exome_num_rows):
-            if (Manta_Exome.iloc[row_num,2]!="NA"):
-                Manta_Exome.iloc[row_num,2]= int(Manta_Exome.iloc[row_num,2])
-                if (Manta_Exome.iloc[row_num, 2]== (-1)):
-                    Manta_Exome.iloc[row_num, 2]= Manta_Exome.iloc[row_num,1]+1
-            row_num=row_num +1 
+		manta_df_2 = manta_df[['CHROM', 'POS', 'END', 'REF', 'SVTYPE']]
+		manta_df_2.columns = ['CHROM', 'POS', 'END', 'REF', 'SVTYPE']
+		manta_df_2['Regions'] = '-'
+		manta_df_2['QC'] = 'PASS'
+		manta_df_2['method'] = 'Manta'
+		manta_df_2['ALT_1'] = manta_df_2['SVTYPE']
 
-    #Change value in QC column if depth<160 or R2<0.98 for sample
-    if (Manta_Exome is not None):    
-    
-        row=0 
-        num_rows_exome_depth_metrics= Exome_depth_metrics.shape[0]
+	else:
 
-        while (row<num_rows_exome_depth_metrics):
-            samples_bam= Exome_depth_metrics.iloc[row,0].split("_")
-            sample_2= samples_bam[7].split(".")
-            sample_3=sample_2[0]
-            if (sample_3 ==sample):
-                Manta_Exome['QC']= Manta_Exome['QC'].astype(str)
-                a=0
-                for i in Manta_Exome['depth']:
-                    print(Manta_Exome.iloc[a,6])
-                    Manta_Exome.iloc[a,6]
-                    if (i<160 and Exome_depth_metrics.iloc[row, 2]<0.98):
-                        Manta_Exome.iloc[a,6]="R2<0.98; Depth<160"
-                    elif (i<160):
-                        Manta_Exome.iloc[a,6]="Depth<160"
-                    a=a+1
-            row=row+1
 
-    
-    # Add the Gene column by comparing chrom, start position and end position to those in bed file
-    if (Manta_Exome is not None):
-        num_rows_Manta_Exome= Manta_Exome.shape[0]
-        num_rows_bed_file= bed_file.shape[0]
+		# Make a dataframe with a single row with everything set to NA
+		data = [{'CHROM':'NA', 'POS':'NA', 'END':'NA', 'REF':'NA', 'SVTYPE':'NA', 'Regions':'-'}]
+		manta_df_2 = pandas.DataFrame(data)
+		manta_df_2 = manta_df_2[['CHROM', 'POS', 'END', 'REF', 'SVTYPE', 'Regions']]
+		manta_df_2['QC'] = 'PASS'
+		manta_df_2['method'] = 'Manta'
+		manta_df_2['ALT_1'] = manta_df_2['SVTYPE']
 
-        a=0
-        b=0
+	
+	#Create dataframe from Exome depth vcf
+	exome_df = allel.vcf_to_dataframe(exome_dir + '/' + sample + '_final_cnv_fixed.vcf.gz' , fields=['*'])
 
-        gene_list=[]
+	if exome_df is not None:
 
-        while (a<num_rows_Manta_Exome):
-            b=0
-            while (b<num_rows_bed_file):
-                if (type(bed_file.iloc[b,0])!= str):
-                    bed_file.iloc[b,0]=int(bed_file.iloc[b,0])
-                else:
-                    Manta_Exome.iloc[a,0]=str(Manta_Exome.iloc[a,0])
-                bed_file.iloc[b,1]=int(bed_file.iloc[b,1])
-                bed_file.iloc[b,2]=int(bed_file.iloc[b,2])
-                if(type(Manta_Exome.iloc[a,0]) != str):
-                        Manta_Exome.iloc[a,0]= int(Manta_Exome.iloc[a,0])
-                else:
-                    bed_file.iloc[b,0]=str(bed_file.iloc[b,0])
-                if(Manta_Exome.iloc[a,1] != "NA"):
-                    Manta_Exome.iloc[a,1]= int(Manta_Exome.iloc[a,1])
-                if(Manta_Exome.iloc[a,2] != "NA"):    
-                    Manta_Exome.iloc[a,2]= int(Manta_Exome.iloc[a,2])
-                if (((Manta_Exome.iloc[a,0]== bed_file.iloc[b,0]) and(Manta_Exome.iloc[a,2]>= bed_file.iloc[b,2]) and (Manta_Exome.iloc[a,1]<= bed_file.iloc[b,1])) or ((Manta_Exome.iloc[a,0]== bed_file.iloc[b,0]) and(Manta_Exome.iloc[a,1]>= bed_file.iloc[b,1]) and (Manta_Exome.iloc[a,2]<= bed_file.iloc[b,2])) or ((Manta_Exome.iloc[a,0]== bed_file.iloc[b,0]) and (Manta_Exome.iloc[a,1]<= bed_file.iloc[b,1]) and (Manta_Exome.iloc[a,2]<= bed_file.iloc[b,2])and (Manta_Exome.iloc[a,2] >= bed_file.iloc[b,1])) or ((Manta_Exome.iloc[a,0]== bed_file.iloc[b,0]) and (Manta_Exome.iloc[a,1]<= bed_file.iloc[b,2]) and (Manta_Exome.iloc[a,1]>= bed_file.iloc[b,1]) and (Manta_Exome.iloc[a,2]>=bed_file[b,2]))) :
-                    bed_file.iloc[b,3]=str(bed_file.iloc[b,3])
-                    gene= bed_file.iloc[b,3].split(".")
-                    if (len(gene_list)<=a):
-                        gene_list.append(gene[0])
-                
-            
-                b=b+1
-            if (len(gene_list)<=a):
-                gene_list.append("NA")
-    
-            a=a+1
+		exome_df_2 = exome_df[['CHROM', 'POS', 'END', 'REF', 'ALT_1', 'Regions']]
+		exome_df_2['QC'] = 'PASS'
+		exome_df_2['method'] = 'exomeDepth'
 
-    if (Manta_Exome is not None):
-        Manta_Exome['gene']= gene_list
+	else:
+		exome_data = [{'CHROM':'NA', 'POS':'NA', 'END':'NA', 'REF':'NA', 'ALT_1':'NA', 'Regions':'NA'}]
+		exome_df_2 = pandas.DataFrame(exome_data)
+		exome_df_2 = exome_df_2[['CHROM', 'POS', 'END', 'REF', 'ALT_1', 'Regions']]
+		exome_df_2['QC'] = 'PASS'
+		exome_df_2['method'] = 'exomeDepth'
 
-    #Reorder the columns and change column names
-    if (Manta_Exome is not None):
-        order= [9,7,0,1,2,3,4,5,6,8,10]
-        Manta_Exome=Manta_Exome[Manta_Exome.columns[order]]
-        Manta_Exome.columns=['sample', 'method','chr', 'start', 'end', 'ref', 'type', 'regions', 'qc', 'depth', 'gene']
 
-    #Add sample dataframe to main dataframe containing all samples
-    if (Manta_Exome is not None):
-        dataFrame=dataFrame.append(Manta_Exome)
-        
-#output the dataframe containing the CNVs for all sample as a CSV
-dataFrame.to_csv(output_file, index=False)
+	#Combine both Manta and ExomeDepth dataframes and add depth and sample ID
+	if (exome_df_2 is not None) and (manta_df_2 is not None):
+
+		manta_exome= exome_df_2.append(manta_df_2)
+		manta_exome['depth'] = depth_of_coverage_summary_mean
+		manta_exome['sampleid'] = sample
+
+	elif (exome_df_2 is None) and (manta_df_2 is not None):
+
+		manta_exome= manta_df_2
+		manta_exome['depth']= depth_of_coverage_summary_mean
+		manta_exome['sampleid']= sample
+
+	elif (exome_df_2 is not None) and (manta_df_2 is None):
+
+		manta_exome= exome_df_2
+		manta_exome['depth'] = depth_of_coverage_summary_mean
+		manta_exome['sampleid'] = sample
+
+	else:
+
+		manta_exome = None
+
+	if manta_exome is not None:
+
+		manta_exome['END'] = manta_exome.apply(fix_end_position,axis=1)
+
+		# Annotate with data from the exome depth logs
+		manta_exome = pandas.merge(manta_exome, exome_depth_metrics, left_on = 'sampleid', right_on = 'sampleid')
+		manta_exome['QC'] = manta_exome.apply(assign_qc, axis=1)
+
+		# Add gene annotation
+		manta_exome['Gene'] = manta_exome.apply(get_overlapping_genes, axis=1, args=(grouped_bed,))
+
+		#Add sample dataframe to main dataframe containing all samples
+		dataFrame = dataFrame.append(manta_exome)
+
+#output the dataframe containing the CNVs for all sample as a TSV
+if manta_exome is not None:
+
+	final_df = dataFrame[['sampleid', 'method', 'CHROM', 'POS', 'END', 'REF', 'ALT_1', 'Regions', 'QC', 'depth', 'Gene']]
+
+	# Remove < and > from <DUP> and <DEL>
+	final_df['ALT_1'] = final_df['ALT_1'].apply(lambda x: x.strip('<').strip('>'))
+
+	# Create new columns with different names
+	final_df['Sample'] = final_df['sampleid']
+	final_df['Method'] = final_df['method']
+	final_df['Chr'] = final_df['CHROM']
+	final_df['Start'] = final_df['POS']
+	final_df['End'] = final_df['END']
+	final_df['Ref'] = final_df['REF']
+	final_df['Type'] = final_df['ALT_1']
+	final_df['Depth'] = final_df['depth']
+
+	# Write to TSV
+	final_df[['Sample', 'Method', 'Chr', 'Start', 'End', 'Ref', 'Type', 'Regions', 'QC', 'Depth', 'Gene']].to_csv(output_file, index=False, sep='\t')
+
+
+
+
+
+
+
+
+
+
+
 
 
