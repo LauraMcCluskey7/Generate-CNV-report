@@ -124,7 +124,6 @@ exome_depth_metrics['sampleid'] = exome_depth_metrics['BamPath'].apply(lambda x:
 
 samples_list = list(exome_depth_metrics.groupby('sampleid').count().index)
 
-
 # Read BED file
 bed_file = pandas.read_csv(bed, names=['Chrom', 'Start', 'End', 'Comment'], sep='\t', header=None)
 
@@ -135,7 +134,6 @@ bed_file['gene'] = bed_file['Comment'].apply(lambda x: x.split('.')[0])
 grouped_bed = bed_file.groupby(['Chrom', 'gene']).agg({'Start': 'min', 'End': 'max'})
 
 grouped_bed = grouped_bed.reset_index()
-
 
 #Loop through all samples and read in the relevant files
 for sample in samples_list: 
@@ -178,6 +176,7 @@ for sample in samples_list:
 		exome_df_2['method'] = 'exomeDepth'
 
 	else:
+		
 		exome_data = [{'CHROM':'NA', 'POS':'NA', 'END':'NA', 'REF':'NA', 'ALT_1':'NA', 'Regions':'NA'}]
 		exome_df_2 = pandas.DataFrame(exome_data)
 		exome_df_2 = exome_df_2[['CHROM', 'POS', 'END', 'REF', 'ALT_1', 'Regions']]
@@ -188,19 +187,19 @@ for sample in samples_list:
 	#Combine both Manta and ExomeDepth dataframes and add depth and sample ID
 	if (exome_df_2 is not None) and (manta_df_2 is not None):
 
-		manta_exome= exome_df_2.append(manta_df_2)
+		manta_exome = exome_df_2.append(manta_df_2)
 		manta_exome['depth'] = depth_of_coverage_summary_mean
 		manta_exome['sampleid'] = sample
 
 	elif (exome_df_2 is None) and (manta_df_2 is not None):
 
-		manta_exome= manta_df_2
-		manta_exome['depth']= depth_of_coverage_summary_mean
-		manta_exome['sampleid']= sample
+		manta_exome = manta_df_2
+		manta_exome['depth'] = depth_of_coverage_summary_mean
+		manta_exome['sampleid'] = sample
 
 	elif (exome_df_2 is not None) and (manta_df_2 is None):
 
-		manta_exome= exome_df_2
+		manta_exome = exome_df_2
 		manta_exome['depth'] = depth_of_coverage_summary_mean
 		manta_exome['sampleid'] = sample
 
